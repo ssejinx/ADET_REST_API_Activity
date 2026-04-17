@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Artist Marketplace - Secure Portal</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; }
+        .hidden { display: none; }
+        .box { background: white; padding: 20px; border-radius: 10px; margin: auto; max-width: 550px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        input, textarea { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; background: #1a73e8; color: white; font-weight: bold; width: 100%; }
+        
+        /* Message Styles */
+        .msg { padding: 10px; border-radius: 5px; margin-bottom: 10px; text-align: center; font-weight: bold; }
+        .error-msg { color: #d93025; background: #f8d7da; border: 1px solid #f5c6cb; }
+        .success-msg { color: #155724; background: #d4edda; border: 1px solid #c3e6cb; }
+        
+        .item { border-bottom: 1px solid #eee; padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
+        .btn-logout { background: #5f6368; margin-top: 10px; }
+        .btn-green { background: #28a745; }
+        .btn-edit { background: #f4b400; color: black; margin-right: 5px; }
+        .btn-delete { background: #d93025; }
+        hr { border: 0; border-top: 1px solid #eee; margin: 20px 0; }
+        .controls { display: flex; gap: 5px; }
+    </style>
+</head>
+<body>
+
+    <!-- ADMIN LOGIN -->
+    <div class="box">
+        <div id="login-error" class="msg error-msg hidden">⛔ Incorrect Admin Key. Please try again.</div>
+
+        <div id="login-section">
+            <h3>🛡️ Admin Authorization</h3>
+            <input type="password" id="admin-token" placeholder="Enter Admin Secret Key">
+            <button onclick="login()">Login to Dashboard</button>
+        </div>
+
+        <div id="logout-section" class="hidden">
+            <p>Welcome, <strong>Administrator</strong></p>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <!-- USER VIEW -->
+    <div id="public-ui" class="box">
+        <h3>📝 Registration Request</h3>
+        <div id="reg-error" class="msg error-msg hidden"></div>
+        <div id="reg-success" class="msg success-msg hidden"></div>
+
+        <input type="text" id="req-name" placeholder="Desired Username">
+        <textarea id="req-bio" placeholder="Short Bio"></textarea>
+        <button class="btn-green" onclick="sendRequest()">Submit Application</button>
+        <hr>
+        <h3>🔍 Search Artist</h3>
+        <input type="text" id="search-name" placeholder="Enter username to search">
+        <button onclick="verifyUser()">Search Database</button>
+        <p id="search-res" style="text-align: center; font-weight: bold; margin-top: 15px;"></p>
+    </div>
+
+    <!-- ADMIN DASHBOARD -->
+    <div id="admin-ui" class="hidden">
+        <div class="box">
+            <h3>⏳ Pending Applications</h3>
+            <div id="pending-list"></div>
+        </div>
+        <div class="box">
+            <h3>✅ Approved Artists</h3>
+            <div id="managed-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'api.php';
+        let token = localStorage.getItem('token') || '';
+
+        function login() {
+            token = document.getElementById('admin-token').value;
+            document.getElementById('login-error').classList.add('hidden');
+            loadAdminData(); 
+        }
+
+        function logout() {
+            token = '';
+            localStorage.removeItem('token');
+            location.reload();
+        }
+
+        async function loadAdminData() {
+            try {
+                const res = await fetch(API, { headers: { 'X-Admin-Token': token } });
+                if (res.status === 401) {
+                    document.getElementById('login-error').classList.remove('hidden');
+                    return;
+                }
+                const artists = await res.json();
+                const pRes = await fetch(API + '?action=pending', { headers: {'X-Admin-Token': token} });
+                const pending = await pRes.json();
+
+                showAdminUI(artists, pending);
+            } catch (err) { console.error(err); }
+        }
+
+        function showAdminUI(artists, pending) {
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('logout-section').classList.remove('hidden');
+            document.getElementById('admin-ui').classList.remove('hidden');
+            document.getElementById('public-ui').classList.add('hidden');
+
+            document.getElementById('pending-list').innerHTML = pending.map(u => `
+                <div class='item'>
+                    <span><strong>@${u.username}</strong></span>
+                    <button onclick="approve('${u.username}')" style="width:auto; background:#28a745">Approve</button>
+                </div>`).join('');
+
+            document.getElementById('managed-list').innerHTML = artists.map(u => `
+                <div class='item'>
+                    <span><strong>@${u.username}</strong>: ${u.bio}</span>
+                    <div class="controls">
+                        <button class="btn-edit" onclick="editBio('${u.username}')" style="width:auto;">Edit</button>
+                        <button class="btn-delete" onclick="del('${u.username}')" style="width:auto;">Delete</button>
+                    </div>
+                </div>`).join('');
+        }
+
+        async function sendRequest() {
+            const username = document.getElementById('req-name').value;
+            const bio = document.getElementById('req-bio').value;
+            const errBanner = document.getElementById('reg-error');
+            const successBanner = document.getElementById('reg-success');
+
+            errBanner.classList.add('hidden');
+            successBanner.classList.add('hidden');
+
+            try {
+                const res = await fetch(API + '?action=request', {
+                    method: 'POST',
+                    body: JSON.stringify({ username, bio })
+                });
+                const data = await res.json();
+
+                if (res.status === 409) {
+                    errBanner.innerText = "❌ " + data.error;
+                    errBanner.classList.remove('hidden');
+                } else if (res.ok) {
+                    successBanner.innerText = "✅ " + data.message;
+                    successBanner.classList.remove('hidden');
+                    document.getElementById('req-name').value = '';
+                    document.getElementById('req-bio').value = '';
+                }
+            } catch (e) { errBanner.innerText = "❌ Connection failed."; errBanner.classList.remove('hidden'); }
+        }
+
+        async function verifyUser() {
+            const name = document.getElementById('search-name').value;
+            const display = document.getElementById('search-res');
+            if (!name) return;
+
+            try {
+                const res = await fetch(`${API}?action=verify&username=${name}`);
+                const data = await res.json();
+                if (res.status === 200) {
+                    display.innerText = "✅ Verified: " + data.user.bio;
+                    display.style.color = "green";
+                } else {
+                    display.innerText = "❌ User not found";
+                    display.style.color = "red";
+                }
+            } catch (e) { display.innerText = "❌ Search failed."; display.style.color = "red"; }
+        }
+
+        async function approve(u) {
+            await fetch(`${API}?action=approve&username=${u}`, { method: 'POST', headers: {'X-Admin-Token': token} });
+            loadAdminData();
+        }
+
+        // --- RESTORED EDIT FUNCTION ---
+        async function editBio(u) {
+            const newBio = prompt("Enter new bio for @" + u);
+            if (!newBio) return;
+            const res = await fetch(API + '?username=' + u, {
+                method: 'PUT',
+                headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bio: newBio })
+            });
+            if (res.ok) loadAdminData();
+            else alert("Failed to update bio.");
+        }
+
+        async function del(u) {
+            if(!confirm("Delete user?")) return;
+            await fetch(`${API}?username=${u}`, { method: 'DELETE', headers: {'X-Admin-Token': token} });
+            loadAdminData();
+        }
+
+        if (token) loadAdminData();
+    </script>
+</body>
+</html>
